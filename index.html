@@ -234,7 +234,25 @@ textarea{resize:vertical;min-height:38px;}
 <div id="modal-root"></div>
 <div id="toast"></div>
 
-<script>
+<script type="module">
+/* ============================================================
+   Firebase
+============================================================ */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCkM-fvjrSAX-DoZACMXJowlzjji6mYKMU",
+  authDomain: "geounsaac-4e484.firebaseapp.com",
+  projectId: "geounsaac-4e484",
+  storageBucket: "geounsaac-4e484.firebasestorage.app",
+  messagingSenderId: "825654137614",
+  appId: "1:825654137614:web:89ef25f4346f46da883d5f"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+const stateRef = doc(db, "geounsaac", "state");
+
 /* ============================================================
    Constantes
 ============================================================ */
@@ -285,42 +303,26 @@ function toast(msg){
 ============================================================ */
 async function saveState(){
   try{
-    await window.storage.set('geounsaac_members', JSON.stringify(state.members), true);
-    await window.storage.set('geounsaac_activities', JSON.stringify(state.activities), true);
-    await window.storage.set('geounsaac_attendance', JSON.stringify(state.attendance), true);
-    await window.storage.set('geounsaac_settings', JSON.stringify(state.settings), true);
-  }catch(e){ console.error(e); toast("⚠ No se pudo guardar. Intenta de nuevo."); }
+    await setDoc(stateRef, {
+      members: state.members,
+      activities: state.activities,
+      attendance: state.attendance,
+      settings: state.settings
+    });
+  }catch(e){ console.error(e); toast("⚠ No se pudo guardar en Firebase. Revisa tu conexión."); }
 }
 
 async function loadState(){
-  try{ const m = await window.storage.get('geounsaac_members', true); state.members = m ? JSON.parse(m.value) : []; }catch(e){ state.members = []; }
-  try{ const a = await window.storage.get('geounsaac_activities', true); state.activities = a ? JSON.parse(a.value) : []; }catch(e){ state.activities = []; }
-  try{ const at = await window.storage.get('geounsaac_attendance', true); state.attendance = at ? JSON.parse(at.value) : {}; }catch(e){ state.attendance = {}; }
-  try{ const s = await window.storage.get('geounsaac_settings', true); if(s) state.settings = {...state.settings, ...JSON.parse(s.value)}; }catch(e){ /* se usan los valores por defecto */ }
-
-  // Migración desde el formato antiguo (una tarea = una fila plana)
-  if(state.activities.length===0){
-    try{
-      const old = await window.storage.get('geounsaac_meetings', true);
-      if(old){
-        const oldRows = JSON.parse(old.value);
-        if(Array.isArray(oldRows) && oldRows.length){
-          state.activities = oldRows.map(r=>({
-            id: r.id || uid("act"),
-            fecha: r.fechaReunion || toISO(new Date()),
-            tipo: "Reunión",
-            tipoOtro: "",
-            titulo: r.actividad || "(actividad)",
-            moderadorId: r.moderadorId || "",
-            redactorId: r.redactorId || "",
-            tasks: [{ id: uid("tsk"), unidad: r.unidad||UNITS[0], tarea: r.tarea||"", fechaInicio: r.fechaInicio, fechaFin: r.fechaFin, estado: r.estado||"Pendiente" }]
-          }));
-          await saveState();
-          toast("Datos anteriores migrados al nuevo formato de actividades");
-        }
-      }
-    }catch(e){ /* no había datos antiguos */ }
-  }
+  try{
+    const snap = await getDoc(stateRef);
+    if(snap.exists()){
+      const d = snap.data();
+      state.members = d.members || [];
+      state.activities = d.activities || [];
+      state.attendance = d.attendance || {};
+      state.settings = { ...state.settings, ...(d.settings||{}) };
+    }
+  }catch(e){ console.error(e); toast("⚠ No se pudo conectar con Firebase."); }
 }
 
 /* ============================================================
