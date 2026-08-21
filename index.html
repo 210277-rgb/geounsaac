@@ -311,7 +311,7 @@ td{user-select:text;-webkit-user-select:text;}
    Firebase
 ============================================================ */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCkM-fvjrSAX-DoZACMXJowlzjji6mYKMU",
@@ -403,8 +403,11 @@ function toast(msg){
 /* ============================================================
    Persistencia
 ============================================================ */
+let suppressNextSnapshot = false; // evita re-renderizar por el eco de nuestro propio guardado
+
 async function saveState(){
   try{
+    suppressNextSnapshot = true;
     await setDoc(stateRef, {
       members: state.members,
       activities: state.activities,
@@ -416,19 +419,32 @@ async function saveState(){
   }catch(e){ console.error(e); toast("⚠ No se pudo guardar en Firebase. Revisa tu conexión."); }
 }
 
+function applySnapshotData(d){
+  state.members = d.members || [];
+  state.activities = d.activities || [];
+  state.attendance = d.attendance || {};
+  state.attendanceState = d.attendanceState || {};
+  state.attendanceDays = d.attendanceDays || [];
+  state.settings = { ...state.settings, ...(d.settings||{}) };
+}
+
+/* Carga inicial: espera la primera lectura antes de mostrar la app */
 async function loadState(){
   try{
     const snap = await getDoc(stateRef);
-    if(snap.exists()){
-      const d = snap.data();
-      state.members = d.members || [];
-      state.activities = d.activities || [];
-      state.attendance = d.attendance || {};
-      state.attendanceState = d.attendanceState || {};
-      state.attendanceDays = d.attendanceDays || [];
-      state.settings = { ...state.settings, ...(d.settings||{}) };
-    }
+    if(snap.exists()) applySnapshotData(snap.data());
   }catch(e){ console.error(e); toast("⚠ No se pudo conectar con Firebase."); }
+}
+
+/* Sincronización en tiempo real: si alguien más cambia datos en Firestore,
+   esta pestaña se actualiza sola sin necesidad de recargar la página. */
+function subscribeState(){
+  onSnapshot(stateRef, (snap)=>{
+    if(suppressNextSnapshot){ suppressNextSnapshot = false; return; }
+    if(!snap.exists()) return;
+    applySnapshotData(snap.data());
+    render();
+  }, (e)=>{ console.error(e); toast("⚠ Se perdió la sincronización en tiempo real."); });
 }
 
 /* ============================================================
@@ -1454,11 +1470,10 @@ function attachHandlers(){
         const esDiaSuelto = state.attendanceDays.some(d=>d.id===actId);
         const esActividad = state.activities.some(a=>a.id===actId);
         const msg = esActividad
-          ? "¿Eliminar esta columna? Como corresponde a una actividad del cronograma, también se eliminará esa actividad (con sus tareas) de \"Actividades\", además de los registros de P/F/J. Esta acción no se puede deshacer."
+          ? "¿Eliminar esta columna de asistencia? La actividad seguirá existiendo en \"Actividades\"; solo se borrará su columna en Asistencia y los registros de P/F/J de todos los miembros. Esta acción no se puede deshacer."
           : "¿Eliminar esta columna de asistencia? Se borrarán los registros de P/F/J de todos los miembros para este día. Esta acción no se puede deshacer.";
         if(!confirm(msg)) return;
         if(esDiaSuelto) state.attendanceDays = state.attendanceDays.filter(d=>d.id!==actId);
-        if(esActividad) state.activities = state.activities.filter(a=>a.id!==actId);
         delete state.attendance[actId];
         delete state.attendanceState[actId];
         await saveState();
@@ -1595,6 +1610,7 @@ async function init(){
   $("#app-content").innerHTML = `<div class="empty" style="padding:120px 0;"><div class="ic">◆</div><b>Cargando GEOUNSAAC…</b></div>`;
   await loadState();
   render();
+  subscribeState();
 }
 init();
 </script>
