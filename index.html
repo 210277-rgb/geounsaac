@@ -299,7 +299,7 @@ td{user-select:text;-webkit-user-select:text;}
   <div class="navbtn" data-view="gantt"><span class="ic">▤</span>Cronograma Gantt</div>
   <div class="navbtn" data-view="calendario"><span class="ic">▦</span>Calendario</div>
   <div class="navbtn" data-view="asistencia"><span class="ic">✓</span>Asistencia</div>
-  <div class="nav-foot" id="nav-foot-meeting">Datos compartidos en vivo con todo el círculo.</div>
+  <div class="nav-foot" id="nav-foot-meeting">Como en todo perfil de suelo, cada generación es una capa nueva sobre la anterior. Bienvenida, nueva generación de ce.GeoUNSAAC.<br>v2.3<br>Autor: Sebastian E. y Claude</div>
 </div>
 
 <div id="main"><div id="app-content"></div></div>
@@ -334,17 +334,17 @@ const UNIT_HEX = {"Presidencia":"#7a1f3d","Logística":"#1b3a6b","Finanzas":"#e6
 const UNIDADES_TAREA = ["Presidencia", ...UNITS];
 const MASTER_KEY = "ce.geounsaac2026";
 const RRHH_KEY = "recursos.humanos2026";
-const CARGOS = ["Presidente","Vicepresidente","Director","Subdirector","Miembro Activo","Aspirante"];
+const CARGOS = ["Presidente","Vicepresidente","Director","Subdirector","Miembro Activo","Miembro de Apoyo"];
 function cargosDeUnidad(unidad){
   if(unidad==="Presidencia") return ["Presidente","Vicepresidente"];
   if(unidad==="Asesores") return ["Asesor"];
-  return ["Aspirante","Miembro Activo","Subdirector","Director"];
+  return ["Director","Subdirector","Miembro Activo","Miembro de Apoyo"];
 }
 /* Rango de cada cargo: entre más bajo el número, más "peso" tiene el cargo, y su
    insignia se pinta con un tono más intenso (aunque siempre dentro de la misma
    familia de color que su unidad). */
-const CARGO_WEIGHT = {"Presidente":0,"Vicepresidente":1,"Director":1,"Asesor":1,"Subdirector":2,"Miembro Activo":3,"Aspirante":4};
-const CARGO_ABBR = {"Miembro Activo":"M. Activo"};
+const CARGO_WEIGHT = {"Presidente":0,"Vicepresidente":1,"Director":1,"Asesor":1,"Subdirector":2,"Miembro Activo":3,"Miembro de Apoyo":4};
+const CARGO_ABBR = {"Miembro Activo":"M. Activo","Miembro de Apoyo":"M. Apoyo"};
 function cargoLabel(cargo){ return CARGO_ABBR[cargo] || cargo; }
 function hexToRgb(hex){
   const h = hex.replace("#","");
@@ -367,9 +367,18 @@ function cargoBadgeStyle(unidad, cargo){
 }
 const ESTADOS_TAREA = ["Pendiente","En Proceso","Completada","Retrasada"];
 const STATUS_HEX = {Pendiente:"#8b98ab","En Proceso":"#4c8bf5",Completada:"#33c07f",Retrasada:"#ef4d5f"};
-const TIPOS = ["Reunión General","Reunión de Directorio","Salida de Campo","Laboratorio","Ponencia","Confraternización","Otro"];
-const TIPOS_ASISTENCIA = TIPOS.filter(t=>t!=="Reunión de Directorio");
-const TIPO_ICON = {"Reunión General":"🗓️","Reunión de Directorio":"🧭","Salida de Campo":"🥾","Laboratorio":"🔬","Ponencia":"🎤","Confraternización":"🎉","Otro":"✦","Reunión":"🗓️"};
+const TIPOS = ["Reunión General","Reunión de Directorio","Salida de Campo","Laboratorio","Ponencia","Confraternización","Evento","Otro"];
+const TIPOS_ASISTENCIA = TIPOS.filter(t=>t!=="Reunión de Directorio" && t!=="Evento");
+const TIPO_ICON = {"Reunión General":"🗓️","Reunión de Directorio":"🧭","Salida de Campo":"🥾","Laboratorio":"🔬","Ponencia":"🎤","Confraternización":"🎉","Evento":"📌","Otro":"✦","Reunión":"🗓️"};
+/* Colores cíclicos para diferenciar visualmente cada actividad-hija dentro de
+   un mismo evento, tanto en el Gantt como en el Calendario. */
+const EVENTO_COLORS = ["#7a2331","#1b3a6b","#2fa84f","#e6c229","#7b2fbf","#d62828","#c98a2b","#3f78c9","#f28c28","#4c7a3a"];
+function eventoActColor(a){
+  if(!a.eventId) return null;
+  const hermanas = state.activities.filter(x=>x.eventId===a.eventId).sort((x,y)=>(x.fecha||"").localeCompare(y.fecha||"")||(x.hora||"").localeCompare(y.hora||""));
+  const i = hermanas.findIndex(x=>x.id===a.id);
+  return EVENTO_COLORS[Math.max(i,0) % EVENTO_COLORS.length];
+}
 const ATT_HEX = {P:"#33c07f", F:"#ef4d5f", J:"#f5a623"};
 const ATT_LABEL = {"":"—", P:"Presente", F:"Falta", J:"Justificado"};
 const FALTA_ANARANJADO = "#f28c28";
@@ -405,8 +414,18 @@ function toast(msg){
    Persistencia
 ============================================================ */
 let suppressNextSnapshot = false; // evita re-renderizar por el eco de nuestro propio guardado
+// Protección contra pérdida de datos: mientras loadState() no haya traído con
+// éxito el estado ya existente en Firestore, saveState() se niega a escribir
+// (evita que un guardado accidental o disparado muy pronto sobrescriba el
+// documento entero con datos vacíos).
+let stateLoaded = false;
 
 async function saveState(){
+  if(!stateLoaded){
+    console.warn("saveState() bloqueado: el estado aún no se cargó desde Firebase.");
+    toast("⚠ Aún cargando datos — intenta de nuevo en un momento");
+    return false;
+  }
   try{
     suppressNextSnapshot = true;
     await setDoc(stateRef, {
@@ -442,7 +461,13 @@ async function loadState(){
   try{
     const snap = await getDoc(stateRef);
     if(snap.exists()) applySnapshotData(snap.data());
-  }catch(e){ console.error(e); toast("⚠ No se pudo conectar con Firebase."); }
+    // Se autoriza a guardar solo tras una lectura exitosa (exista o no el
+    // documento — un proyecto nuevo sin datos previos también puede guardar).
+    stateLoaded = true;
+  }catch(e){
+    console.error(e);
+    toast("⚠ No se pudo conectar con Firebase. No se guardará nada hasta reconectar, para no perder tu información.");
+  }
 }
 
 /* Sincronización en tiempo real: si alguien más cambia datos en Firestore,
@@ -564,6 +589,7 @@ function buildGanttRows(monthStart, monthEnd){
   acts.forEach(a=>{
     rows.push({
       kind:"header", id:"hdr-"+a.id, activityId:a.id, actividad:a.titulo, tipo:a.tipo,
+      eventId:a.eventId||null,
       fechaInicio:a.fecha, fechaFin:a.fechaFin||a.fecha
     });
     (a.tasks||[])
@@ -583,8 +609,6 @@ function setView(v){ currentView = v; render(); }
 
 function render(){
   $$(".navbtn").forEach(b=>b.classList.toggle("active", b.dataset.view===currentView));
-  const foot = $("#nav-foot-meeting");
-  if(foot){ const nm = nextMeeting(); foot.textContent = nm ? `Datos compartidos en vivo con todo el círculo. Próxima reunión general: ${fmtShort(nm.fecha)}${nm.hora?" · "+nm.hora:""}.` : "Datos compartidos en vivo con todo el círculo."; }
   const root = $("#app-content");
   if(currentView==="dashboard") root.innerHTML = viewDashboard();
   else if(currentView==="miembros") root.innerHTML = viewMiembros();
@@ -751,19 +775,30 @@ function viewMiembros(){
   <div class="card section">
     <h3>Agregar miembro</h3>
     <form id="member-form">
+      <div class="jd-section-title" style="margin-top:0;">Datos personales</div>
+      <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+        <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:8px;width:92px;">
+          <div id="mf-foto-preview" style="width:88px;height:88px;border-radius:12px;background:var(--teal-soft);color:var(--teal);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:26px;overflow:hidden;border:2px solid var(--line);">?</div>
+          <input required type="file" name="foto" id="mf-foto" accept="image/*" style="font-size:10px;width:92px;">
+        </div>
+        <div class="form-grid" style="flex:1;min-width:280px;">
+          <div class="field"><label>Apellido paterno</label><input required name="apellidoPaterno" placeholder="Quispe"></div>
+          <div class="field"><label>Apellido materno</label><input required name="apellidoMaterno" placeholder="Mamani"></div>
+          <div class="field"><label>Nombres</label><input required name="nombres" placeholder="Ana"></div>
+          <div class="field"><label>DNI</label><input required name="dni" placeholder="70XXXXXX" maxlength="8" inputmode="numeric"></div>
+          <div class="field"><label>Fecha de nacimiento</label><input required type="date" name="fechaNacimiento"></div>
+          <div class="field"><label>Teléfono / WhatsApp</label><input required name="telefono" placeholder="9xxxxxxxx"></div>
+          <div class="field span2"><label>Correo institucional</label><input required type="email" name="email" placeholder="nombre@unsaac.edu.pe"></div>
+        </div>
+      </div>
+
+      <div class="jd-section-title">Datos de directorio</div>
       <div class="form-grid">
-        <div class="field"><label>Apellido paterno</label><input required name="apellidoPaterno" placeholder="Quispe"></div>
-        <div class="field"><label>Apellido materno</label><input name="apellidoMaterno" placeholder="Mamani"></div>
-        <div class="field"><label>Nombres</label><input required name="nombres" placeholder="Ana"></div>
-        <div class="field"><label>DNI</label><input name="dni" placeholder="70XXXXXX" maxlength="8" inputmode="numeric"></div>
-        <div class="field"><label>Código universitario</label><input name="codigo" placeholder="180xxx"></div>
-        <div class="field"><label>Fecha de nacimiento</label><input type="date" name="fechaNacimiento"></div>
         <div class="field"><label>Unidad</label><select name="unidad" id="mf-unidad">${UNIDADES.map(u=>`<option>${u}</option>`).join("")}</select></div>
         <div class="field"><label>Cargo</label><select name="cargo" id="mf-cargo">${cargosDeUnidad(UNIDADES[0]).map(c=>`<option>${c}</option>`).join("")}</select></div>
-        <div class="field"><label>Correo institucional</label><input type="email" name="email" placeholder="nombre@unsaac.edu.pe"></div>
-        <div class="field"><label>Teléfono / WhatsApp</label><input name="telefono" placeholder="9xxxxxxxx"></div>
-        <div class="field"><label>Fotografía (opcional)</label><input type="file" name="foto" id="mf-foto" accept="image/*"></div>
+        <div class="field" id="mf-codigo-wrap"><label>Código universitario</label><input required name="codigo" id="mf-codigo" placeholder="180xxx"></div>
       </div>
+
       <div class="modal-actions" style="justify-content:flex-start;margin-top:16px;">
         <button class="btn" type="submit">+ Agregar al directorio</button>
       </div>
@@ -890,7 +925,7 @@ function renderActCard(a, compact){
           <div class="muted" style="font-size:12px;margin-top:2px;">${a.virtual?"Reunión general predeterminada — se repite cada semana.":`Moderador: ${mod?mod.nombre:"sin asignar"} · Redactor: ${red?red.nombre:"sin asignar"}`}</div>
         </div>
         <div style="display:flex;gap:8px;">
-          ${a.virtual?`<button class="btn ghost small" data-action="edit-meeting">Configurar</button>`:`<button class="btn ghost small" data-action="edit-activity" data-id="${a.id}">Editar</button>`}
+          ${a.virtual?`<button class="btn ghost small" data-action="edit-meeting">Configurar</button>`:`<button class="btn ghost small" data-action="edit-activity" data-id="${a.id}">Editar</button><button class="btn danger small" data-action="suprimir-activity" data-id="${a.id}">🗑 Suprimir</button>`}
         </div>
       </div>
       ${a.virtual?"":`
@@ -937,10 +972,53 @@ function renderGrupoCard(g, archivedCollapsed){
         <div style="font-family:var(--font-display);font-size:20px;margin-top:6px;">${g.nombre}</div>
         <div class="muted" style="font-size:12px;margin-top:2px;">${rango} · Moderador 1: ${mod1?mod1.nombre:"sin asignar"} · Moderador 2: ${mod2?mod2.nombre:"sin asignar"}</div>
       </div>
-      <button class="btn ghost small" data-action="edit-grupo" data-id="${g.id}">Editar conjunto</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn ghost small" data-action="edit-grupo" data-id="${g.id}">Editar conjunto</button>
+        <button class="btn danger small" data-action="suprimir-grupo" data-id="${g.id}">🗑 Suprimir conjunto</button>
+      </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:14px;">${g.acts.map(a=>renderActCard(a,true)).join("")}</div>
   </div>`;
+}
+
+function renderEventoCard(eventId, hijas){
+  const primera = hijas[0], ultima = hijas[hijas.length-1];
+  const rango = (primera.fecha===ultima.fecha) ? fmtShort(primera.fecha) : `${fmtShort(primera.fecha)} → ${fmtShort(ultima.fecha)}`;
+  return `
+    <div class="card section" style="border-left:4px solid var(--maroon);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span class="badge" style="color:var(--maroon);background:var(--maroon-soft);">${TIPO_ICON["Evento"]} Evento</span>
+            <span class="muted" style="font-size:12px;">${rango} · ${hijas.length} actividad${hijas.length===1?"":"es"}</span>
+          </div>
+          <div style="font-family:var(--font-display);font-size:19px;">${primera.eventTitle||"Evento"}</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn ghost small" data-action="edit-event" data-event="${eventId}">Editar evento</button>
+          <button class="btn danger small" data-action="suprimir-event" data-event="${eventId}">🗑 Suprimir evento</button>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:14px;">
+        <table>
+          <thead><tr><th>#</th><th>Actividad</th><th>Fecha</th><th>Hora</th><th>Moderadores</th></tr></thead>
+          <tbody>
+            ${hijas.map((h,i)=>{
+              const m1 = memberById(h.moderadorId), m2 = memberById(h.moderador2Id);
+              const modLabel = (m1||m2) ? [m1&&m1.nombre, m2&&m2.nombre].filter(Boolean).join(" y ") : "sin asignar";
+              return `
+              <tr>
+                <td><span class="dot" style="background:${eventoActColor(h)};border-radius:50%;"></span></td>
+                <td class="namecell">${h.titulo}</td>
+                <td class="muted">${fmtShort(h.fecha)}</td>
+                <td class="muted">${h.hora||"—"}</td>
+                <td class="muted">${modLabel}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 function viewActividades(){
@@ -964,15 +1042,25 @@ function viewActividades(){
 
   const gruposActivos = gruposConActs.filter(g=>!g.archivado);
   const gruposArchivados = gruposConActs.filter(g=>g.archivado);
-  const sueltas = state.activities.filter(a=>!a.grupoId);
+  const sueltas = state.activities.filter(a=>!a.grupoId && !a.eventId);
 
-  // Mezcla actividades sueltas + conjuntos activos, ordenados todos por cercanía a hoy.
+  // Agrupa las actividades-hijas de cada evento (por eventId) en un solo item.
+  const eventIds = [...new Set(state.activities.filter(a=>a.eventId).map(a=>a.eventId))];
+  const eventos = eventIds.map(eid=>{
+    const hijas = state.activities.filter(a=>a.eventId===eid).sort((x,y)=>fromISO(x.fecha)-fromISO(y.fecha)||(x.hora||"").localeCompare(y.hora||""));
+    if(!hijas.length) return null;
+    const nearest = Math.min(...hijas.map(near));
+    return { eventId: eid, hijas, nearest };
+  }).filter(Boolean);
+
+  // Mezcla actividades sueltas + conjuntos activos + eventos, ordenados por cercanía a hoy.
   const items = [
     ...sueltas.map(a=>({ tipo:"act", data:a, nearest:near(a) })),
     ...gruposActivos.map(g=>({ tipo:"grupo", data:g, nearest:g.nearest })),
+    ...eventos.map(e=>({ tipo:"evento", data:e, nearest:e.nearest })),
   ].sort((x,y)=> x.nearest - y.nearest);
 
-  const cards = items.map(it=> it.tipo==="act" ? renderActCard(it.data,false) : renderGrupoCard(it.data,false)).join("");
+  const cards = items.map(it=> it.tipo==="act" ? renderActCard(it.data,false) : it.tipo==="grupo" ? renderGrupoCard(it.data,false) : renderEventoCard(it.data.eventId, it.data.hijas)).join("");
   const archivedCards = gruposArchivados.sort((a,b)=>b.nearest-a.nearest).map(g=>renderGrupoCard(g,true)).join("");
 
   return `
@@ -1012,15 +1100,20 @@ function blankDraft(){
     redactorId: "",
     showTasks: false,
     tasks: [],
-    grupoId: ""
+    grupoId: "",
+    // --- campos exclusivos de "Evento" (cuando tipo === "Evento") ---
+    eventoTitulo: "",
+    eventoActs: [] // cada una: {id, titulo, fecha, hora, moderadorId, moderador2Id}
   };
 }
 function blankTask(){ return { id: uid("tsk"), unidad: UNIDADES_TAREA[0], tarea: "", fechaInicio: toISO(new Date()), fechaFin: toISO(addDays(new Date(),3)), estado:"Pendiente" }; }
+function blankEventoAct(){ return { id: uid("eact"), titulo: "", fecha: toISO(new Date()), hora: "", moderadorId: "", moderador2Id: "" }; }
 
 function openActivityModal(existing){
   activityDraft = existing ? JSON.parse(JSON.stringify(existing)) : blankDraft();
   if(!activityDraft.tasks) activityDraft.tasks = [];
   if(!activityDraft.grupoId) activityDraft.grupoId = "";
+  if(!activityDraft.eventoActs) activityDraft.eventoActs = [];
   activityDraft.showTasks = activityDraft.tasks.length>0;
   if(!activityDraft.hora) activityDraft.hora = "";
   if(!activityDraft.fechaFin) activityDraft.fechaFin = activityDraft.fecha;
@@ -1029,25 +1122,70 @@ function openActivityModal(existing){
 }
 function closeActivityModal(){ activityDraft = null; renderModalRoot(); }
 
+/* Abre el modal ya en modo "editar evento", cargando todas las actividades-hijas
+   que comparten el mismo eventId dentro de state.activities. */
+function openEventModal(eventId){
+  const hermanas = state.activities.filter(a=>a.eventId===eventId).sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||"")||(a.hora||"").localeCompare(b.hora||""));
+  if(!hermanas.length) return;
+  const d = blankDraft();
+  d.tipo = "Evento";
+  d.id = eventId; // usamos el id del evento como marcador de edición
+  d.eventoTitulo = hermanas[0].eventTitle || "";
+  d.eventoActs = hermanas.map(a=>({ id:a.id, titulo:a.titulo, fecha:a.fecha, hora:a.hora||"", moderadorId:a.moderadorId||"", moderador2Id:a.moderador2Id||"" }));
+  activityDraft = d;
+  renderModalRoot();
+}
+
 function renderModalRoot(){
   const root = $("#modal-root");
   if(!activityDraft){ if(!attendanceDayDraft) root.innerHTML = ""; return; }
   const d = activityDraft;
   const memberOpts = (sel)=> activeMembers().map(m=>`<option value="${m.id}" ${sel===m.id?"selected":""}>${m.nombre}</option>`).join("");
   const noMembers = activeMembers().length===0;
+  const esEvento = d.tipo === "Evento";
+  const esEdicion = !!d.id;
 
   root.innerHTML = `
   <div class="overlay" id="activity-overlay">
     <div class="modal">
-      <h2>${d.id ? "Editar actividad" : "Registrar actividad"}</h2>
-      <div class="modalsub">Define la actividad del día y reparte sus tareas entre las unidades que participan.</div>
+      <h2>${esEdicion ? (esEvento?"Editar evento":"Editar actividad") : "Registrar actividad"}</h2>
+      <div class="modalsub">${esEvento ? "Un evento agrupa varias actividades (ponencias, salidas de campo, laboratorios…) en distintas fechas y horas, cada una con su propio moderador." : "Define la actividad del día y reparte sus tareas entre las unidades que participan."}</div>
       ${noMembers?`<div class="empty" style="padding:14px 0 4px;"><b style="color:var(--s-retrasado);">Agrega miembros activos primero</b>Ve a "Miembros" para poder asignar Moderador, Redactor y encargados.</div>`:""}
 
       <div class="form-grid">
         <div class="field"><label>Tipo de actividad</label>
-          <select id="d-tipo">${TIPOS.map(t=>`<option ${t===d.tipo?"selected":""}>${t}</option>`).join("")}</select>
+          <select id="d-tipo" ${esEdicion?"disabled":""}>${TIPOS.map(t=>`<option ${t===d.tipo?"selected":""}>${t}</option>`).join("")}</select>
         </div>
-        ${d.tipo==="Otro" ? `<div class="field"><label>Especificar tipo</label><input id="d-tipoOtro" value="${d.tipoOtro||""}" placeholder="Ej: Capacitación"></div>` : `<div class="field"></div>`}
+        ${(!esEvento && d.tipo==="Otro") ? `<div class="field"><label>Especificar tipo</label><input id="d-tipoOtro" value="${d.tipoOtro||""}" placeholder="Ej: Capacitación"></div>` : `<div class="field"></div>`}
+      </div>
+      ${esEdicion?`<div class="muted" style="font-size:11px;margin:-6px 0 14px;">El tipo de actividad no puede cambiarse al editar.</div>`:""}
+
+      ${esEvento ? renderEventoModoHTML(d, memberOpts) : renderActividadModoHTML(d, memberOpts)}
+
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-action="close-activity-modal">Cancelar</button>
+        <button type="button" class="btn" data-action="save-activity">${esEvento?"Guardar evento":"Guardar actividad"}</button>
+      </div>
+    </div>
+  </div>`;
+
+  $("#d-tipo").onchange = (e)=>{ activityDraft.tipo = e.target.value; renderModalRoot(); };
+  if($("#d-tipoOtro")) $("#d-tipoOtro").oninput = (e)=> activityDraft.tipoOtro = e.target.value;
+
+  if(esEvento){
+    wireEventoModoListeners();
+  } else {
+    wireActividadModoListeners();
+  }
+
+  $('[data-action="close-activity-modal"]').onclick = closeActivityModal;
+  $('[data-action="save-activity"]').onclick = ()=> esEvento ? saveEvento() : saveActivity();
+}
+
+/* ---------- Modo normal (actividad individual, comportamiento original) ---------- */
+function renderActividadModoHTML(d, memberOpts){
+  return `
+      <div class="form-grid">
         <div class="field"><label>Fecha ${d.multiDia?"de inicio":""}</label><input type="date" id="d-fecha" value="${d.fecha}"></div>
         <div class="field">
           <label>&nbsp;</label>
@@ -1082,20 +1220,13 @@ function renderModalRoot(){
             <button type="button" class="btn danger tiny" data-action="remove-task-row" data-idx="${i}">✕</button>
           </div>`).join("")}
       </div>` : `<div class="muted" style="font-size:12px;padding:2px 0 10px;">Esta actividad no requiere tareas asignadas (ej. reunión general, confraternización). Usa "Designar tareas" si necesitas repartir pendientes entre unidades.</div>`}
+  `;
+}
 
-      <div class="modal-actions">
-        <button type="button" class="btn ghost" data-action="close-activity-modal">Cancelar</button>
-        <button type="button" class="btn" data-action="save-activity">Guardar actividad</button>
-      </div>
-    </div>
-  </div>`;
-
-  // listeners de campos fijos (sin re-render, para no perder el foco)
-  $("#d-tipo").onchange = (e)=>{ activityDraft.tipo = e.target.value; renderModalRoot(); };
+function wireActividadModoListeners(){
   $("#d-fecha").oninput = (e)=>{ activityDraft.fecha = e.target.value; if(!activityDraft.multiDia) activityDraft.fechaFin = e.target.value; };
   if($("#d-fechafin")) $("#d-fechafin").oninput = (e)=> activityDraft.fechaFin = e.target.value;
   if($("#d-multidia")) $("#d-multidia").onchange = (e)=>{ activityDraft.multiDia = e.target.checked; if(!activityDraft.multiDia) activityDraft.fechaFin = activityDraft.fecha; else if(!activityDraft.fechaFin || activityDraft.fechaFin===activityDraft.fecha) activityDraft.fechaFin = toISO(addDays(fromISO(activityDraft.fecha),1)); renderModalRoot(); };
-  if($("#d-tipoOtro")) $("#d-tipoOtro").oninput = (e)=> activityDraft.tipoOtro = e.target.value;
   $("#d-hora").oninput = (e)=> activityDraft.hora = e.target.value;
   $("#d-titulo").oninput = (e)=> activityDraft.titulo = e.target.value;
   $("#d-moderador").onchange = (e)=> activityDraft.moderadorId = e.target.value;
@@ -1112,8 +1243,6 @@ function renderModalRoot(){
   if($('[data-action="add-task-row"]')) $('[data-action="add-task-row"]').onclick = ()=>{ activityDraft.tasks.push(blankTask()); renderModalRoot(); };
   if($('[data-action="toggle-tasks"]')) $('[data-action="toggle-tasks"]').onclick = ()=>{ activityDraft.showTasks = true; if(!activityDraft.tasks.length) activityDraft.tasks = [blankTask()]; renderModalRoot(); };
   $$('[data-action="remove-task-row"]').forEach(b=> b.onclick = ()=>{ activityDraft.tasks.splice(+b.dataset.idx,1); if(!activityDraft.tasks.length) activityDraft.showTasks = false; renderModalRoot(); });
-  $('[data-action="close-activity-modal"]').onclick = closeActivityModal;
-  $('[data-action="save-activity"]').onclick = saveActivity;
 }
 
 async function saveActivity(){
@@ -1143,6 +1272,92 @@ async function saveActivity(){
   toast(d.id ? "Actividad actualizada" : "Actividad registrada");
 }
 
+/* ---------- Modo "Evento" (varias actividades-hijas, cada una con su
+   propia fecha, hora, Moderador 1 obligatorio y Moderador 2 opcional) ---------- */
+function renderEventoModoHTML(d, memberOpts){
+  return `
+      <div class="form-grid" style="grid-template-columns:1fr;">
+        <div class="field"><label>Nombre del evento</label><input id="ev-titulo" value="${d.eventoTitulo||""}" placeholder="Ej: Semana de la Geología 2026"></div>
+      </div>
+
+      <div class="section-label"><span>Actividades del evento</span><button type="button" class="btn ghost tiny" data-action="ev-add-act">+ Añadir actividad</button></div>
+      <div id="ev-act-rows">
+        ${d.eventoActs.map((a,i)=>`
+          <div class="card" style="padding:14px 16px;margin-bottom:12px;border-left:4px solid ${EVENTO_COLORS[i%EVENTO_COLORS.length]};">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <b style="font-size:12.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;">Actividad ${i+1}</b>
+              ${d.eventoActs.length>1?`<button type="button" class="btn danger tiny" data-action="ev-remove-act" data-idx="${i}">✕ Quitar</button>`:""}
+            </div>
+            <div class="form-grid">
+              <div class="field span2"><label>Nombre de la actividad</label><input class="ev-a-titulo" data-idx="${i}" value="${a.titulo}" placeholder="Ej: Ponencia inaugural"></div>
+              <div class="field"><label>Fecha</label><input type="date" class="ev-a-fecha" data-idx="${i}" value="${a.fecha}"></div>
+              <div class="field"><label>Hora</label><input class="ev-a-hora" data-idx="${i}" value="${a.hora||""}" placeholder="Ej: 09:00–11:00"></div>
+              <div class="field"><label>Moderador 1</label><select class="ev-a-mod1" data-idx="${i}"><option value="">— elegir —</option>${memberOpts(a.moderadorId)}</select></div>
+              <div class="field"><label>Moderador 2 (opcional)</label><select class="ev-a-mod2" data-idx="${i}"><option value="">— sin asignar —</option>${memberOpts(a.moderador2Id)}</select></div>
+            </div>
+          </div>`).join("")}
+      </div>
+      <div class="muted" style="font-size:12px;padding:2px 0 6px;">Cada actividad de este evento aparecerá con su propio color en el Gantt y el Calendario. Ninguna requiere tareas por unidad ni afecta la asistencia (esa se registra por separado, de forma manual).</div>
+  `;
+}
+
+function wireEventoModoListeners(){
+  $("#ev-titulo").oninput = (e)=> activityDraft.eventoTitulo = e.target.value;
+
+  $$(".ev-a-titulo").forEach(el=> el.oninput = e=> activityDraft.eventoActs[+el.dataset.idx].titulo = e.target.value);
+  $$(".ev-a-fecha").forEach(el=> el.oninput = e=> activityDraft.eventoActs[+el.dataset.idx].fecha = e.target.value);
+  $$(".ev-a-hora").forEach(el=> el.oninput = e=> activityDraft.eventoActs[+el.dataset.idx].hora = e.target.value);
+  $$(".ev-a-mod1").forEach(el=> el.onchange = e=> activityDraft.eventoActs[+el.dataset.idx].moderadorId = e.target.value);
+  $$(".ev-a-mod2").forEach(el=> el.onchange = e=> activityDraft.eventoActs[+el.dataset.idx].moderador2Id = e.target.value);
+
+  $('[data-action="ev-add-act"]').onclick = ()=>{ activityDraft.eventoActs.push(blankEventoAct()); renderModalRoot(); };
+  $$('[data-action="ev-remove-act"]').forEach(b=> b.onclick = ()=>{ activityDraft.eventoActs.splice(+b.dataset.idx,1); renderModalRoot(); });
+
+  if(!activityDraft.eventoActs.length) activityDraft.eventoActs.push(blankEventoAct());
+}
+
+async function saveEvento(){
+  const d = activityDraft;
+  if(!d.eventoTitulo.trim()){ toast("Ponle un nombre al evento"); return; }
+  if(!d.eventoActs.length){ toast("Añade al menos una actividad al evento"); return; }
+  for(const a of d.eventoActs){
+    if(!a.titulo.trim()){ toast("Cada actividad del evento necesita un nombre"); return; }
+    if(!a.fecha){ toast("Cada actividad del evento necesita una fecha"); return; }
+    if(!a.moderadorId){ toast("Cada actividad del evento necesita un Moderador 1"); return; }
+  }
+  const eventId = d.id || uid("evt");
+  const eventoTitulo = d.eventoTitulo.trim();
+
+  const btn = $('[data-action="save-activity"]');
+  if(btn){ btn.disabled = true; btn.dataset.origText = btn.textContent; btn.textContent = "Guardando…"; }
+
+  // Reemplaza por completo las actividades-hijas previas de este evento (si edición)
+  const otras = state.activities.filter(a=>a.eventId!==eventId);
+  const nuevasHijas = d.eventoActs.map(a=>({
+    id: a.id || uid("act"),
+    eventId, eventTitle: eventoTitulo,
+    fecha: a.fecha, fechaFin: a.fecha,
+    tipo: "Evento", tipoOtro: "",
+    titulo: a.titulo.trim(),
+    hora: (a.hora||"").trim(),
+    moderadorId: a.moderadorId, moderador2Id: a.moderador2Id||"",
+    redactorId: "",
+    tasks: [],
+    grupoId: ""
+  }));
+  state.activities = [...otras, ...nuevasHijas];
+
+  const ok = await saveState();
+  if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origText; }
+  if(!ok){
+    alert("No se pudo guardar el evento en Firebase. Verifica tu conexión e inténtalo de nuevo.");
+    return; // no cierres el modal: el usuario puede reintentar sin perder lo escrito
+  }
+  closeActivityModal();
+  render();
+  toast(d.id ? "Evento actualizado" : "Evento registrado");
+}
+
 /* ============================================================
    GANTT
 ============================================================ */
@@ -1167,7 +1382,7 @@ function viewGantt(){
       cells += `<div class="gantt-cell ${wk?'weekend':''}"></div>`;
     }
     if(r.kind==="header"){
-      rowsHtml += `<div class="gantt-label gl-hdr"><b>◆ ${r.actividad}</b><span>${TIPO_ICON[r.tipo]||"✦"} Actividad completa · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}</span></div>${cells}`;
+      rowsHtml += `<div class="gantt-label gl-hdr" ${r.eventId?`style="border-left:4px solid ${eventoActColor(state.activities.find(a=>a.id===r.activityId))};"`:""}><b>${r.eventId?"● ":"◆ "}${r.actividad}</b><span>${TIPO_ICON[r.tipo]||"✦"} ${r.eventId?"Actividad de evento":"Actividad completa"} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}</span></div>${cells}`;
     }else{
       rowsHtml += `<div class="gantt-label gl-task"><b>${r.tarea||"—"}</b><span>${r.unidad||"—"}</span></div>${cells}`;
     }
@@ -1227,9 +1442,10 @@ function paintGanttBars(){
     bar.style.width = (span*dayWidth - 4) + "px";
     bar.style.top = (labelEl.offsetTop + 8) + "px";
     bar.style.height = (labelEl.getBoundingClientRect().height - 16) + "px";
-    bar.style.background = r.kind==="header" ? "var(--teal)" : (r.estado==="Completada" ? STATUS_HEX["Completada"] : r.estado==="Retrasada" ? STATUS_HEX["Retrasada"] : r.estado==="En Proceso" ? STATUS_HEX["En Proceso"] : (UNIT_HEX[r.unidad]||STATUS_HEX["Pendiente"]));
-    bar.textContent = r.kind==="header" ? ("◆ "+r.actividad) : (r.tarea || "");
-    bar.title = r.kind==="header" ? `${r.actividad} · actividad completa · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}` : `${r.actividad} · ${r.unidad} · ${r.estado} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}`;
+    const evColorBar = (r.kind==="header" && r.eventId) ? eventoActColor(state.activities.find(a=>a.id===r.activityId)) : null;
+    bar.style.background = r.kind==="header" ? (evColorBar || "var(--teal)") : (r.estado==="Completada" ? STATUS_HEX["Completada"] : r.estado==="Retrasada" ? STATUS_HEX["Retrasada"] : r.estado==="En Proceso" ? STATUS_HEX["En Proceso"] : (UNIT_HEX[r.unidad]||STATUS_HEX["Pendiente"]));
+    bar.textContent = r.kind==="header" ? ((evColorBar?"● ":"◆ ")+r.actividad) : (r.tarea || "");
+    bar.title = r.kind==="header" ? `${r.actividad} · ${r.eventId?"actividad de evento":"actividad completa"} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}` : `${r.actividad} · ${r.unidad} · ${r.estado} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}`;
     grid.appendChild(bar);
   });
 }
@@ -1273,7 +1489,7 @@ function calWeek(){
       const act = activityOnDay(d);
       return `<div class="week-day ${act?'meetingday':''}">
         <h4>${DOW[(d.getDay()+6)%7]}${isSameDay(d,today)?' · hoy':''}<b>${d.getDate()}</b></h4>
-        ${act?`<div class="week-task" style="background:var(--teal);">${TIPO_ICON[act.tipo]} ${act.titulo}</div>`:""}
+        ${act?`<div class="week-task" style="background:${act.eventId?eventoActColor(act):"var(--teal)"};">${TIPO_ICON[act.tipo]} ${act.titulo}</div>`:""}
         ${tasks.map(t=>`<div class="week-task" style="background:${UNIT_HEX[t.unidad]}">${t.tarea||t.actividad}<small>${t.unidad} · ${t.estado}</small></div>`).join("") || (act?"":`<div class="muted" style="font-size:11px;">Sin actividades</div>`)}
       </div>`;
     }).join("")}
@@ -1648,6 +1864,46 @@ function attachHandlers(){
       else if(action==="toggle-archived-grupo"){ const id = el.dataset.id; if(expandedArchivedGroups.has(id)) expandedArchivedGroups.delete(id); else expandedArchivedGroups.add(id); render(); }
       else if(action==="open-attendance-day-modal"){ openAttendanceDayModal(); }
       else if(action==="edit-activity"){ const a = state.activities.find(x=>x.id===el.dataset.id); if(a) openActivityModal(a); }
+      else if(action==="edit-event"){ openEventModal(el.dataset.event); }
+      else if(action==="suprimir-event"){
+        const clave = prompt("Ingresa la clave maestra para suprimir este evento:");
+        if(clave===null) return;
+        if(clave!==MASTER_KEY){ toast("⚠ Clave maestra incorrecta"); return; }
+        const eventId = el.dataset.event;
+        const hijas = state.activities.filter(x=>x.eventId===eventId);
+        if(!hijas.length) return;
+        if(!confirm(`¿Suprimir el evento "${hijas[0].eventTitle||"Evento"}" y sus ${hijas.length} actividad${hijas.length===1?"":"es"}? Esta acción no se puede deshacer.`)) return;
+        state.activities = state.activities.filter(x=>x.eventId!==eventId);
+        await saveState();
+        render();
+        toast("Evento suprimido");
+      }
+      else if(action==="suprimir-activity"){
+        const clave = prompt("Ingresa la clave maestra para suprimir esta actividad:");
+        if(clave===null) return;
+        if(clave!==MASTER_KEY){ toast("⚠ Clave maestra incorrecta"); return; }
+        const a = state.activities.find(x=>x.id===el.dataset.id);
+        if(!a) return;
+        if(!confirm(`¿Suprimir la actividad "${a.titulo}"? Esta acción no se puede deshacer. (Sus columnas de asistencia, si existieran de forma independiente, no se ven afectadas.)`)) return;
+        state.activities = state.activities.filter(x=>x.id!==a.id);
+        await saveState();
+        render();
+        toast("Actividad suprimida");
+      }
+      else if(action==="suprimir-grupo"){
+        const clave = prompt("Ingresa la clave maestra para suprimir este conjunto de actividades:");
+        if(clave===null) return;
+        if(clave!==MASTER_KEY){ toast("⚠ Clave maestra incorrecta"); return; }
+        const g = state.grupos.find(x=>x.id===el.dataset.id);
+        if(!g) return;
+        const hijas = state.activities.filter(a=>a.grupoId===g.id);
+        if(!confirm(`¿Suprimir el conjunto "${g.nombre}" y sus ${hijas.length} actividad${hijas.length===1?"":"es"}? Esta acción no se puede deshacer.`)) return;
+        state.activities = state.activities.filter(a=>a.grupoId!==g.id);
+        state.grupos = state.grupos.filter(x=>x.id!==g.id);
+        await saveState();
+        render();
+        toast("Conjunto suprimido");
+      }
       else if(action==="del-member"){
         const clave = prompt("Ingresa la clave maestra para eliminar a este miembro:");
         if(clave===null) return;
@@ -1668,12 +1924,32 @@ function attachHandlers(){
   if(mform){
     const mfUnidad = $("#mf-unidad", mform);
     const mfCargo = $("#mf-cargo", mform);
+    const mfCodigoWrap = $("#mf-codigo-wrap", mform);
+    const mfCodigo = $("#mf-codigo", mform);
     if(mfUnidad && mfCargo){
       mfUnidad.onchange = ()=>{
         mfCargo.innerHTML = cargosDeUnidad(mfUnidad.value).map(c=>`<option>${c}</option>`).join("");
         mfCargo.disabled = mfUnidad.value==="Asesores";
+        // Los Asesores no tienen código universitario: se oculta el campo y
+        // deja de ser obligatorio solo para ellos; todo lo demás sigue siéndolo.
+        const esAsesor = mfUnidad.value==="Asesores";
+        if(mfCodigoWrap) mfCodigoWrap.style.display = esAsesor ? "none" : "";
+        if(mfCodigo){ mfCodigo.required = !esAsesor; if(esAsesor) mfCodigo.value = ""; }
       };
       mfUnidad.onchange();
+    }
+
+    // Vista previa pequeña de la foto seleccionada (o "?" mientras no haya ninguna).
+    const mfFoto = $("#mf-foto", mform);
+    const mfFotoPreview = $("#mf-foto-preview", mform);
+    if(mfFoto && mfFotoPreview){
+      mfFoto.onchange = ()=>{
+        const file = mfFoto.files && mfFoto.files[0];
+        if(!file){ mfFotoPreview.innerHTML = "?"; return; }
+        const reader = new FileReader();
+        reader.onload = ()=>{ mfFotoPreview.innerHTML = `<img src="${reader.result}" style="width:100%;height:100%;object-fit:cover;">`; };
+        reader.readAsDataURL(file);
+      };
     }
     mform.onsubmit = async (e)=>{
       e.preventDefault();
@@ -1683,19 +1959,19 @@ function attachHandlers(){
       const nombres = toTitleCase(fd.get("nombres"));
       const nombreCompleto = `${apellidoPaterno} ${apellidoMaterno}`.trim() + (nombres?`, ${nombres}`:"");
       const unidad = fd.get("unidad");
-      const cargo = unidad==="Asesores" ? "Asesor" : fd.get("cargo");
+      const esAsesor = unidad==="Asesores";
+      const cargo = esAsesor ? "Asesor" : fd.get("cargo");
       const fotoFile = fd.get("foto");
+      if(!fotoFile || fotoFile.size===0){ toast("⚠ La fotografía es obligatoria"); return; }
       let foto = "";
-      if(fotoFile && fotoFile.size>0){
-        try{ foto = await fileToResizedDataURL(fotoFile, 160); }
-        catch(err){ toast("No se pudo procesar la foto, se guardó sin ella"); }
-      }
+      try{ foto = await fileToResizedDataURL(fotoFile, 160); }
+      catch(err){ toast("⚠ No se pudo procesar la foto — inténtalo con otra imagen"); return; }
       const datos = {
         apellidoPaterno, apellidoMaterno, nombres, nombre: nombreCompleto,
-        codigo: fd.get("codigo").trim(), dni: (fd.get("dni")||"").trim(), fechaNacimiento: fd.get("fechaNacimiento")||"", unidad, cargo,
+        codigo: esAsesor ? "" : fd.get("codigo").trim(), dni: (fd.get("dni")||"").trim(), fechaNacimiento: fd.get("fechaNacimiento")||"", unidad, cargo,
         email: fd.get("email").trim(), telefono: fd.get("telefono").trim(), estado: "Activo",
+        foto
       };
-      if(foto) datos.foto = foto;
 
       // Si alguien vuelve a registrarse con el mismo nombre y apellidos, se asume
       // que es la misma persona actualizando sus datos: se reemplaza el registro
@@ -1715,6 +1991,7 @@ function attachHandlers(){
         await saveState(); render(); toast("Miembro agregado al directorio");
       }
       mform.reset();
+      if(mfFotoPreview) mfFotoPreview.innerHTML = "?";
     };
   }
 }
