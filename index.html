@@ -1573,9 +1573,15 @@ function openMeetingModal(){
    HANDLERS
 ============================================================ */
 function attachHandlers(){
+  // IMPORTANTE: este wiring global SOLO debe tocar el contenido principal
+  // (#app-content). Nunca debe recorrer document completo, porque si el modal
+  // (#modal-root) está abierto en ese momento, volvería a pisar los onclick/
+  // onchange que renderModalRoot() ya asignó, dejando el modal "congelado"
+  // (mismo bug que el de sincronización en tiempo real de Firestore).
+  const appRoot = $("#app-content");
   $$(".navbtn").forEach(b=> b.onclick = ()=>{ setView(b.dataset.view); closeMobileMenu(); });
 
-  $$("[data-action]").forEach(el=>{
+  $$("[data-action]", appRoot).forEach(el=>{
     const action = el.dataset.action;
     if(action==="quick-task-status" && el.tagName==="SELECT"){
       el.onchange = async ()=>{
