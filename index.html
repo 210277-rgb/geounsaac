@@ -416,7 +416,13 @@ async function saveState(){
       attendanceDays: state.attendanceDays,
       settings: state.settings
     });
-  }catch(e){ console.error(e); toast("⚠ No se pudo guardar en Firebase. Revisa tu conexión."); }
+    return true;
+  }catch(e){
+    console.error(e);
+    suppressNextSnapshot = false;
+    toast("⚠ No se pudo guardar en Firebase: " + (e && e.code ? e.code : "revisa tu conexión"));
+    return false;
+  }
 }
 
 function applySnapshotData(d){
@@ -1032,7 +1038,14 @@ async function saveActivity(){
   } else {
     state.activities.push(payload);
   }
-  await saveState();
+  const btn = $('[data-action="save-activity"]');
+  if(btn){ btn.disabled = true; btn.dataset.origText = btn.textContent; btn.textContent = "Guardando…"; }
+  const ok = await saveState();
+  if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origText; }
+  if(!ok){
+    alert("No se pudo guardar la actividad en Firebase. Verifica que la base de datos Firestore exista y que las reglas de seguridad permitan escribir, o revisa tu conexión.");
+    return; // no cierres el modal: el usuario puede reintentar sin perder lo escrito
+  }
   closeActivityModal();
   render();
   toast(d.id ? "Actividad actualizada" : "Actividad registrada");
