@@ -1406,7 +1406,7 @@ function openMeetingModal(){
 function attachHandlers(){
   $$(".navbtn").forEach(b=> b.onclick = ()=>{ setView(b.dataset.view); closeMobileMenu(); });
 
-  $$("[data-action]").forEach(el=>{
+  $$("[data-action]", $("#app-content")).forEach(el=>{
     const action = el.dataset.action;
     if(action==="quick-task-status" && el.tagName==="SELECT"){
       el.onchange = async ()=>{
