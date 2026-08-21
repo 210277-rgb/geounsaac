@@ -385,6 +385,11 @@ const FALTA_ANARANJADO = "#f28c28";
 const FALTA_ROJO = "#c94b4b";
 
 let state = { members: [], activities: [], attendance: {}, attendanceState: {}, attendanceDays: [], settings: { reunionDia:"Miércoles", reunionHora:"11:00–13:00", reunionFechaEspecial:"", reunionHoraEspecial:"" } };
+// Protección contra pérdida de datos: mientras loadState() no haya traído
+// exitosamente los datos ya existentes en Firestore, saveState() se niega a
+// escribir (evita que un guardado accidental, o un clic muy rápido al abrir
+// la página, sobrescriba el documento entero con arrays vacíos).
+let stateLoaded = false;
 const DIAS_SEMANA = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
 let currentView = "dashboard";
 let calSubTab = "mes";
@@ -413,6 +418,15 @@ function toast(msg){
    Persistencia
 ============================================================ */
 async function saveState(){
+  if(!stateLoaded){
+    // Salvaguarda: nunca escribir en Firestore antes de haber leído con éxito
+    // el estado existente. Sin esto, un guardado disparado justo al cargar la
+    // página (o tras un fallo de red al leer) podría sobrescribir todos los
+    // datos ya guardados con un estado vacío.
+    console.warn("saveState() bloqueado: el estado aún no se cargó desde Firebase.");
+    toast("⚠ Aún cargando datos — intenta de nuevo en un momento");
+    return;
+  }
   try{
     await setDoc(stateRef, {
       members: state.members,
@@ -437,7 +451,14 @@ async function loadState(){
       state.attendanceDays = d.attendanceDays || [];
       state.settings = { ...state.settings, ...(d.settings||{}) };
     }
-  }catch(e){ console.error(e); toast("⚠ No se pudo conectar con Firebase."); }
+    // Solo se autoriza a guardar después de una lectura exitosa (exista o no
+    // el documento todavía — un proyecto nuevo sin datos previos también debe
+    // poder guardar su primera actividad).
+    stateLoaded = true;
+  }catch(e){
+    console.error(e);
+    toast("⚠ No se pudo conectar con Firebase. No se guardará nada hasta reconectar, para no perder tu información.");
+  }
 }
 
 /* ============================================================
