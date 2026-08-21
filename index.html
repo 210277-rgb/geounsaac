@@ -1017,7 +1017,7 @@ function renderModalRoot(){
   $$(".t-fin").forEach(el=> el.oninput = e=> activityDraft.tasks[+el.dataset.idx].fechaFin = e.target.value);
   $$(".t-estado").forEach(el=> el.onchange = e=> activityDraft.tasks[+el.dataset.idx].estado = e.target.value);
 
-  $('[data-action="add-task-row"]').onclick = ()=>{ activityDraft.tasks.push(blankTask()); renderModalRoot(); };
+  if($('[data-action="add-task-row"]')) $('[data-action="add-task-row"]').onclick = ()=>{ activityDraft.tasks.push(blankTask()); renderModalRoot(); };
   if($('[data-action="toggle-tasks"]')) $('[data-action="toggle-tasks"]').onclick = ()=>{ activityDraft.showTasks = true; if(!activityDraft.tasks.length) activityDraft.tasks = [blankTask()]; renderModalRoot(); };
   $$('[data-action="remove-task-row"]').forEach(b=> b.onclick = ()=>{ activityDraft.tasks.splice(+b.dataset.idx,1); if(!activityDraft.tasks.length) activityDraft.showTasks = false; renderModalRoot(); });
   $('[data-action="close-activity-modal"]').onclick = closeActivityModal;
