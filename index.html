@@ -311,15 +311,15 @@ td{user-select:text;-webkit-user-select:text;}
    Firebase
 ============================================================ */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAmzoJ6uENbnBZRXR14LMQtOyebwgL9SkY",
-  authDomain: "cegeounsaac-a0b62.firebaseapp.com",
-  projectId: "cegeounsaac-a0b62",
-  storageBucket: "cegeounsaac-a0b62.firebasestorage.app",
-  messagingSenderId: "835017734427",
-  appId: "1:835017734427:web:ebdb0943b0622c3e19bbbe"
+  apiKey: "AIzaSyCkM-fvjrSAX-DoZACMXJowlzjji6mYKMU",
+  authDomain: "geounsaac-4e484.firebaseapp.com",
+  projectId: "geounsaac-4e484",
+  storageBucket: "geounsaac-4e484.firebasestorage.app",
+  messagingSenderId: "825654137614",
+  appId: "1:825654137614:web:89ef25f4346f46da883d5f"
 };
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
@@ -367,9 +367,18 @@ function cargoBadgeStyle(unidad, cargo){
 }
 const ESTADOS_TAREA = ["Pendiente","En Proceso","Completada","Retrasada"];
 const STATUS_HEX = {Pendiente:"#8b98ab","En Proceso":"#4c8bf5",Completada:"#33c07f",Retrasada:"#ef4d5f"};
-const TIPOS = ["Reunión General","Reunión de Directorio","Salida de Campo","Laboratorio","Ponencia","Confraternización","Otro"];
-const TIPOS_ASISTENCIA = TIPOS.filter(t=>t!=="Reunión de Directorio");
-const TIPO_ICON = {"Reunión General":"🗓️","Reunión de Directorio":"🧭","Salida de Campo":"🥾","Laboratorio":"🔬","Ponencia":"🎤","Confraternización":"🎉","Otro":"✦","Reunión":"🗓️"};
+const TIPOS = ["Reunión General","Reunión de Directorio","Salida de Campo","Laboratorio","Ponencia","Confraternización","Evento","Otro"];
+const TIPOS_ASISTENCIA = TIPOS.filter(t=>t!=="Reunión de Directorio" && t!=="Evento");
+const TIPO_ICON = {"Reunión General":"🗓️","Reunión de Directorio":"🧭","Salida de Campo":"🥾","Laboratorio":"🔬","Ponencia":"🎤","Confraternización":"🎉","Otro":"✦","Reunión":"🗓️","Evento":"📌"};
+/* Colores para diferenciar visualmente cada actividad-hija dentro de un mismo evento
+   (en el Gantt y el Calendario). Se asignan por índice de forma cíclica. */
+const EVENTO_COLORS = ["#7a2331","#1b3a6b","#2fa84f","#e6c229","#7b2fbf","#d62828","#c98a2b","#3f78c9","#f28c28","#4c7a3a"];
+function eventoActColor(a){
+  if(!a.eventId) return null;
+  const hermanas = state.activities.filter(x=>x.eventId===a.eventId).sort((x,y)=>(x.fecha||"").localeCompare(y.fecha||"")||(x.hora||"").localeCompare(y.hora||""));
+  const i = hermanas.findIndex(x=>x.id===a.id);
+  return EVENTO_COLORS[Math.max(i,0) % EVENTO_COLORS.length];
+}
 const ATT_HEX = {P:"#33c07f", F:"#ef4d5f", J:"#f5a623"};
 const ATT_LABEL = {"":"—", P:"Presente", F:"Falta", J:"Justificado"};
 const FALTA_ANARANJADO = "#f28c28";
@@ -403,11 +412,8 @@ function toast(msg){
 /* ============================================================
    Persistencia
 ============================================================ */
-let suppressNextSnapshot = false; // evita re-renderizar por el eco de nuestro propio guardado
-
 async function saveState(){
   try{
-    suppressNextSnapshot = true;
     await setDoc(stateRef, {
       members: state.members,
       activities: state.activities,
@@ -416,41 +422,22 @@ async function saveState(){
       attendanceDays: state.attendanceDays,
       settings: state.settings
     });
-    return true;
-  }catch(e){
-    console.error(e);
-    suppressNextSnapshot = false;
-    toast("⚠ No se pudo guardar en Firebase: " + (e && e.code ? e.code : "revisa tu conexión"));
-    return false;
-  }
+  }catch(e){ console.error(e); toast("⚠ No se pudo guardar en Firebase. Revisa tu conexión."); }
 }
 
-function applySnapshotData(d){
-  state.members = d.members || [];
-  state.activities = d.activities || [];
-  state.attendance = d.attendance || {};
-  state.attendanceState = d.attendanceState || {};
-  state.attendanceDays = d.attendanceDays || [];
-  state.settings = { ...state.settings, ...(d.settings||{}) };
-}
-
-/* Carga inicial: espera la primera lectura antes de mostrar la app */
 async function loadState(){
   try{
     const snap = await getDoc(stateRef);
-    if(snap.exists()) applySnapshotData(snap.data());
+    if(snap.exists()){
+      const d = snap.data();
+      state.members = d.members || [];
+      state.activities = d.activities || [];
+      state.attendance = d.attendance || {};
+      state.attendanceState = d.attendanceState || {};
+      state.attendanceDays = d.attendanceDays || [];
+      state.settings = { ...state.settings, ...(d.settings||{}) };
+    }
   }catch(e){ console.error(e); toast("⚠ No se pudo conectar con Firebase."); }
-}
-
-/* Sincronización en tiempo real: si alguien más cambia datos en Firestore,
-   esta pestaña se actualiza sola sin necesidad de recargar la página. */
-function subscribeState(){
-  onSnapshot(stateRef, (snap)=>{
-    if(suppressNextSnapshot){ suppressNextSnapshot = false; return; }
-    if(!snap.exists()) return;
-    applySnapshotData(snap.data());
-    render();
-  }, (e)=>{ console.error(e); toast("⚠ Se perdió la sincronización en tiempo real."); });
 }
 
 /* ============================================================
@@ -561,6 +548,7 @@ function buildGanttRows(monthStart, monthEnd){
   acts.forEach(a=>{
     rows.push({
       kind:"header", id:"hdr-"+a.id, activityId:a.id, actividad:a.titulo, tipo:a.tipo,
+      eventId:a.eventId||null,
       fechaInicio:a.fecha, fechaFin:a.fechaFin||a.fecha
     });
     (a.tasks||[])
@@ -597,6 +585,12 @@ function render(){
 
 function statusBadge(status){ const hex = STATUS_HEX[status]||"#8b98ab"; return `<span class="badge" style="color:${hex};background:${hex}22;">${status}</span>`; }
 function tipoBadge(a){ const label = a.tipo==="Otro" && a.tipoOtro ? a.tipoOtro : a.tipo; return `<span class="badge" style="color:var(--teal);background:var(--teal-soft);">${TIPO_ICON[a.tipo]||"✦"} ${label}</span>`; }
+function moderadoresLabel(a){
+  const m1 = memberById(a.moderadorId), m2 = memberById(a.moderador2Id);
+  if(!m1 && !m2) return "sin asignar";
+  if(m1 && m2) return `${m1.nombre} y ${m2.nombre}`;
+  return (m1||m2).nombre;
+}
 
 /* ============================================================
    DASHBOARD
@@ -616,7 +610,13 @@ function viewDashboard(){
   const workload = [{u:"Presidencia", c: tasks.filter(t=>t.unidad==="Presidencia" && t.estado!=="Completada").length}, ...UNITS.map(u=>({u, c: tasks.filter(t=>t.unidad===u && t.estado!=="Completada").length}))];
   const maxW = Math.max(1, ...workload.map(w=>w.c));
   const nextMeet = nextMeeting();
-  const recentActs = [...state.activities].sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||"")).slice(0,4);
+  // Ordenadas por cercanía a hoy (la más próxima a la fecha actual primero,
+  // sea pasada o futura), no por fecha de creación ni orden puramente descendente.
+  const hoyISO = toISO(new Date());
+  const recentActs = [...state.activities]
+    .filter(a=>a.fecha)
+    .sort((a,b)=> Math.abs(fromISO(a.fecha)-fromISO(hoyISO)) - Math.abs(fromISO(b.fecha)-fromISO(hoyISO)))
+    .slice(0,4);
 
   return `
   <div class="topbar">
@@ -865,10 +865,34 @@ function viewUnidades(){
 function viewActividades(){
   // Solo actividades reales — la reunión general recurrente no se muestra aquí
   // para no generar desorden; su próxima fecha ya aparece en el Panel.
-  const sorted = [...state.activities].sort((a,b)=> (b.fecha||"").localeCompare(a.fecha||""));
-  const cards = sorted.map(a=>{
-    const mod = memberById(a.moderadorId), red = memberById(a.redactorId);
-    return `
+  // Las actividades-hijas de un evento se agrupan en una sola tarjeta "Evento".
+  const sueltas = state.activities.filter(a=>!a.eventId);
+  const eventIds = [...new Set(state.activities.filter(a=>a.eventId).map(a=>a.eventId))];
+
+  const cardsSueltas = sueltas.map(a=>({ key:a.fecha||"", html: cardActividadSimple(a) }));
+  const cardsEventos = eventIds.map(eid=>{
+    const hijas = state.activities.filter(a=>a.eventId===eid).sort((x,y)=>(x.fecha||"").localeCompare(y.fecha||"")||(x.hora||"").localeCompare(y.hora||""));
+    const fechaMin = hijas.reduce((m,x)=> !m || x.fecha<m ? x.fecha : m, null);
+    return { key: fechaMin||"", html: cardEvento(eid, hijas) };
+  });
+
+  const cards = [...cardsSueltas, ...cardsEventos].sort((a,b)=> (b.key||"").localeCompare(a.key||"")).map(x=>x.html).join("");
+
+  return `
+  <div class="topbar">
+    <div>
+      <div class="pagetitle">Actividades</div>
+      <div class="pagesub">Una actividad (reunión, salida de campo, laboratorio, ponencia…) puede repartir varias tareas entre distintas unidades a la vez, o agruparse dentro de un Evento de varios días. La reunión general semanal aparece sola, según lo configurado en el Panel.</div>
+    </div>
+    <button class="btn" data-action="open-activity-modal">+ Registrar actividad</button>
+  </div>
+  ${cards || `<div class="card"><div class="empty"><div class="ic">≡</div><b>Sin actividades todavía</b>Registra la primera para ver aquí toda tu programación.</div></div>`}
+  `;
+}
+
+function cardActividadSimple(a){
+  const mod = memberById(a.moderadorId), red = memberById(a.redactorId);
+  return `
     <div class="card section">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
         <div>
@@ -881,7 +905,7 @@ function viewActividades(){
           <div class="muted" style="font-size:12px;margin-top:2px;">${a.virtual?"Reunión general predeterminada — se repite cada semana.":`Moderador: ${mod?mod.nombre:"sin asignar"} · Redactor: ${red?red.nombre:"sin asignar"}`}</div>
         </div>
         <div style="display:flex;gap:8px;">
-          ${a.virtual?`<button class="btn ghost small" data-action="edit-meeting">Configurar</button>`:`<button class="btn ghost small" data-action="edit-activity" data-id="${a.id}">Editar</button>`}
+          ${a.virtual?`<button class="btn ghost small" data-action="edit-meeting">Configurar</button>`:`<button class="btn ghost small" data-action="edit-activity" data-id="${a.id}">Editar</button><button class="btn danger small" data-action="del-activity" data-id="${a.id}">✕ Eliminar</button>`}
         </div>
       </div>
       ${a.virtual?"":`
@@ -901,18 +925,42 @@ function viewActividades(){
         </table>
       </div>`}
     </div>`;
-  }).join("");
+}
 
+function cardEvento(eventId, hijas){
+  const primera = hijas[0], ultima = hijas[hijas.length-1];
+  const rango = (primera.fecha===ultima.fecha) ? fmtShort(primera.fecha) : `${fmtShort(primera.fecha)} → ${fmtShort(ultima.fecha)}`;
   return `
-  <div class="topbar">
-    <div>
-      <div class="pagetitle">Actividades</div>
-      <div class="pagesub">Una actividad (reunión, salida de campo, laboratorio, ponencia…) puede repartir varias tareas entre distintas unidades a la vez. La reunión general semanal aparece sola, según lo configurado en el Panel.</div>
-    </div>
-    <button class="btn" data-action="open-activity-modal">+ Registrar actividad</button>
-  </div>
-  ${cards || `<div class="card"><div class="empty"><div class="ic">≡</div><b>Sin actividades todavía</b>Registra la primera para ver aquí toda tu programación.</div></div>`}
-  `;
+    <div class="card section" style="border-left:4px solid var(--maroon);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span class="badge" style="color:var(--maroon);background:var(--maroon-soft);">${TIPO_ICON["Evento"]} Evento</span>
+            <span class="muted" style="font-size:12px;">${rango} · ${hijas.length} actividad${hijas.length===1?"":"es"}</span>
+          </div>
+          <div style="font-family:var(--font-display);font-size:19px;">${primera.eventTitle||"Evento"}</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn ghost small" data-action="edit-event" data-event="${eventId}">Editar evento</button>
+          <button class="btn danger small" data-action="del-event" data-event="${eventId}">✕ Eliminar evento</button>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:14px;">
+        <table>
+          <thead><tr><th>#</th><th>Actividad</th><th>Fecha</th><th>Hora</th><th>Moderadores</th></tr></thead>
+          <tbody>
+            ${hijas.map((h,i)=>`
+              <tr>
+                <td><span class="dot" style="background:${eventoActColor(h)};border-radius:50%;"></span></td>
+                <td class="namecell">${h.titulo}</td>
+                <td class="muted">${fmtShort(h.fecha)}</td>
+                <td class="muted">${h.hora||"—"}</td>
+                <td class="muted">${moderadoresLabel(h)}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 /* ============================================================
@@ -931,14 +979,19 @@ function blankDraft(){
     moderadorId: "",
     redactorId: "",
     showTasks: false,
-    tasks: []
+    tasks: [],
+    // --- campos exclusivos de "Evento" (cuando tipo === "Evento") ---
+    eventoTitulo: "",
+    eventoActs: [] // cada una: {id, titulo, fecha, hora, moderadorId, moderador2Id}
   };
 }
 function blankTask(){ return { id: uid("tsk"), unidad: UNIDADES_TAREA[0], tarea: "", fechaInicio: toISO(new Date()), fechaFin: toISO(addDays(new Date(),3)), estado:"Pendiente" }; }
+function blankEventoAct(){ return { id: uid("eact"), titulo: "", fecha: toISO(new Date()), hora: "", moderadorId: "", moderador2Id: "" }; }
 
 function openActivityModal(existing){
   activityDraft = existing ? JSON.parse(JSON.stringify(existing)) : blankDraft();
   if(!activityDraft.tasks) activityDraft.tasks = [];
+  if(!activityDraft.eventoActs) activityDraft.eventoActs = [];
   activityDraft.showTasks = activityDraft.tasks.length>0;
   if(!activityDraft.hora) activityDraft.hora = "";
   if(!activityDraft.fechaFin) activityDraft.fechaFin = activityDraft.fecha;
@@ -947,25 +1000,74 @@ function openActivityModal(existing){
 }
 function closeActivityModal(){ activityDraft = null; renderModalRoot(); }
 
+/* Abre el modal ya en modo "editar evento", cargando todas las actividades-hijas
+   que comparten el mismo eventId dentro de state.activities. */
+function openEventModal(eventId){
+  const hermanas = state.activities.filter(a=>a.eventId===eventId).sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||"")||(a.hora||"").localeCompare(b.hora||""));
+  if(!hermanas.length) return;
+  const d = blankDraft();
+  d.tipo = "Evento";
+  d.id = eventId; // usamos el id del evento como marcador de edición
+  d.eventoTitulo = hermanas[0].eventTitle || "";
+  d.eventoActs = hermanas.map(a=>({ id:a.id, titulo:a.titulo, fecha:a.fecha, hora:a.hora||"", moderadorId:a.moderadorId||"", moderador2Id:a.moderador2Id||"" }));
+  activityDraft = d;
+  renderModalRoot();
+}
+
+
 function renderModalRoot(){
   const root = $("#modal-root");
   if(!activityDraft){ if(!attendanceDayDraft) root.innerHTML = ""; return; }
   const d = activityDraft;
   const memberOpts = (sel)=> activeMembers().map(m=>`<option value="${m.id}" ${sel===m.id?"selected":""}>${m.nombre}</option>`).join("");
   const noMembers = activeMembers().length===0;
+  const esEvento = d.tipo === "Evento";
+
+  // El propio evento (id que ya existe en state.activities como eventId) también
+  // cuenta como "edición", igual que una actividad simple existente.
+  const esEdicion = !!d.id;
 
   root.innerHTML = `
   <div class="overlay" id="activity-overlay">
     <div class="modal">
-      <h2>${d.id ? "Editar actividad" : "Registrar actividad"}</h2>
-      <div class="modalsub">Define la actividad del día y reparte sus tareas entre las unidades que participan.</div>
-      ${noMembers?`<div class="empty" style="padding:14px 0 4px;"><b style="color:var(--s-retrasado);">Agrega miembros activos primero</b>Ve a "Miembros" para poder asignar Moderador, Redactor y encargados.</div>`:""}
+      <h2>${esEdicion ? (esEvento?"Editar evento":"Editar actividad") : "Registrar actividad"}</h2>
+      <div class="modalsub">${esEvento ? "Un evento agrupa varias actividades (ponencias, salidas de campo, laboratorios…) en distintas fechas y horas, cada una con su propio moderador." : "Define la actividad del día y reparte sus tareas entre las unidades que participan."}</div>
+      ${noMembers?`<div class="empty" style="padding:14px 0 4px;"><b style="color:var(--s-retrasado);">Agrega miembros activos primero</b>Ve a "Miembros" para poder asignar moderadores, redactor y encargados.</div>`:""}
 
       <div class="form-grid">
         <div class="field"><label>Tipo de actividad</label>
-          <select id="d-tipo">${TIPOS.map(t=>`<option ${t===d.tipo?"selected":""}>${t}</option>`).join("")}</select>
+          <select id="d-tipo" ${esEdicion?"disabled":""}>${TIPOS.map(t=>`<option ${t===d.tipo?"selected":""}>${t}</option>`).join("")}</select>
         </div>
-        ${d.tipo==="Otro" ? `<div class="field"><label>Especificar tipo</label><input id="d-tipoOtro" value="${d.tipoOtro||""}" placeholder="Ej: Capacitación"></div>` : `<div class="field"></div>`}
+        ${(!esEvento && d.tipo==="Otro") ? `<div class="field"><label>Especificar tipo</label><input id="d-tipoOtro" value="${d.tipoOtro||""}" placeholder="Ej: Capacitación"></div>` : `<div class="field"></div>`}
+      </div>
+      ${esEdicion?`<div class="muted" style="font-size:11px;margin:-6px 0 14px;">El tipo de actividad no puede cambiarse al editar.</div>`:""}
+
+      ${esEvento ? renderEventoModoHTML(d, memberOpts) : renderActividadModoHTML(d, memberOpts)}
+
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-action="close-activity-modal">Cancelar</button>
+        <button type="button" class="btn" data-action="save-activity">${esEvento?"Guardar evento":"Guardar actividad"}</button>
+      </div>
+    </div>
+  </div>`;
+
+  $("#d-tipo").onchange = (e)=>{ activityDraft.tipo = e.target.value; renderModalRoot(); };
+  if($("#d-tipoOtro")) $("#d-tipoOtro").oninput = (e)=> activityDraft.tipoOtro = e.target.value;
+
+  if(esEvento){
+    wireEventoModoListeners();
+  } else {
+    wireActividadModoListeners();
+  }
+
+  $('[data-action="close-activity-modal"]').onclick = closeActivityModal;
+  $('[data-action="save-activity"]').onclick = ()=> esEvento ? saveEvento() : saveActivity();
+}
+
+/* ---------- Modo "Actividad" (comportamiento original) ---------- */
+function renderActividadModoHTML(d, memberOpts){
+  return `
+      <div class="form-grid">
         <div class="field"><label>Fecha ${d.multiDia?"de inicio":""}</label><input type="date" id="d-fecha" value="${d.fecha}"></div>
         <div class="field">
           <label>&nbsp;</label>
@@ -983,8 +1085,7 @@ function renderModalRoot(){
       <div class="section-label"><span>Tareas por unidad</span>${d.showTasks ? `<button type="button" class="btn ghost tiny" data-action="add-task-row">+ Añadir tarea</button>` : `<button type="button" class="btn ghost tiny" data-action="toggle-tasks">+ Designar tareas</button>`}</div>
       ${d.showTasks ? `<div id="task-rows">
         ${d.tasks.map((t,i)=>`
-          <div class="task-row" data-idx="${i}">
-            <div class="field"><label>Unidad</label><select class="t-unidad" data-idx="${i}">${UNIDADES_TAREA.map(u=>`<option ${u===t.unidad?"selected":""}>${u}</option>`).join("")}</select></div>
+          <div class="task-row" data-idx="${i}">            <div class="field"><label>Unidad</label><select class="t-unidad" data-idx="${i}">${UNIDADES_TAREA.map(u=>`<option ${u===t.unidad?"selected":""}>${u}</option>`).join("")}</select></div>
             <div class="field"><label>Tarea específica</label><input class="t-tarea" data-idx="${i}" value="${t.tarea}" placeholder="Ej: Diseñar flyer de difusión"></div>
             <div class="field"><label>Inicio</label><input type="date" class="t-inicio" data-idx="${i}" value="${t.fechaInicio}"></div>
             <div class="field"><label>Fin</label><input type="date" class="t-fin" data-idx="${i}" value="${t.fechaFin}"></div>
@@ -992,20 +1093,13 @@ function renderModalRoot(){
             <button type="button" class="btn danger tiny" data-action="remove-task-row" data-idx="${i}">✕</button>
           </div>`).join("")}
       </div>` : `<div class="muted" style="font-size:12px;padding:2px 0 10px;">Esta actividad no requiere tareas asignadas (ej. reunión general, confraternización). Usa "Designar tareas" si necesitas repartir pendientes entre unidades.</div>`}
+  `;
+}
 
-      <div class="modal-actions">
-        <button type="button" class="btn ghost" data-action="close-activity-modal">Cancelar</button>
-        <button type="button" class="btn" data-action="save-activity">Guardar actividad</button>
-      </div>
-    </div>
-  </div>`;
-
-  // listeners de campos fijos (sin re-render, para no perder el foco)
-  $("#d-tipo").onchange = (e)=>{ activityDraft.tipo = e.target.value; renderModalRoot(); };
+function wireActividadModoListeners(){
   $("#d-fecha").oninput = (e)=>{ activityDraft.fecha = e.target.value; if(!activityDraft.multiDia) activityDraft.fechaFin = e.target.value; };
   if($("#d-fechafin")) $("#d-fechafin").oninput = (e)=> activityDraft.fechaFin = e.target.value;
   if($("#d-multidia")) $("#d-multidia").onchange = (e)=>{ activityDraft.multiDia = e.target.checked; if(!activityDraft.multiDia) activityDraft.fechaFin = activityDraft.fecha; else if(!activityDraft.fechaFin || activityDraft.fechaFin===activityDraft.fecha) activityDraft.fechaFin = toISO(addDays(fromISO(activityDraft.fecha),1)); renderModalRoot(); };
-  if($("#d-tipoOtro")) $("#d-tipoOtro").oninput = (e)=> activityDraft.tipoOtro = e.target.value;
   $("#d-hora").oninput = (e)=> activityDraft.hora = e.target.value;
   $("#d-titulo").oninput = (e)=> activityDraft.titulo = e.target.value;
   $("#d-moderador").onchange = (e)=> activityDraft.moderadorId = e.target.value;
@@ -1017,11 +1111,9 @@ function renderModalRoot(){
   $$(".t-fin").forEach(el=> el.oninput = e=> activityDraft.tasks[+el.dataset.idx].fechaFin = e.target.value);
   $$(".t-estado").forEach(el=> el.onchange = e=> activityDraft.tasks[+el.dataset.idx].estado = e.target.value);
 
-  if($('[data-action="add-task-row"]')) $('[data-action="add-task-row"]').onclick = ()=>{ activityDraft.tasks.push(blankTask()); renderModalRoot(); };
+  $('[data-action="add-task-row"]').onclick = ()=>{ activityDraft.tasks.push(blankTask()); renderModalRoot(); };
   if($('[data-action="toggle-tasks"]')) $('[data-action="toggle-tasks"]').onclick = ()=>{ activityDraft.showTasks = true; if(!activityDraft.tasks.length) activityDraft.tasks = [blankTask()]; renderModalRoot(); };
   $$('[data-action="remove-task-row"]').forEach(b=> b.onclick = ()=>{ activityDraft.tasks.splice(+b.dataset.idx,1); if(!activityDraft.tasks.length) activityDraft.showTasks = false; renderModalRoot(); });
-  $('[data-action="close-activity-modal"]').onclick = closeActivityModal;
-  $('[data-action="save-activity"]').onclick = saveActivity;
 }
 
 async function saveActivity(){
@@ -1038,17 +1130,87 @@ async function saveActivity(){
   } else {
     state.activities.push(payload);
   }
-  const btn = $('[data-action="save-activity"]');
-  if(btn){ btn.disabled = true; btn.dataset.origText = btn.textContent; btn.textContent = "Guardando…"; }
-  const ok = await saveState();
-  if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origText; }
-  if(!ok){
-    alert("No se pudo guardar la actividad en Firebase. Verifica que la base de datos Firestore exista y que las reglas de seguridad permitan escribir, o revisa tu conexión.");
-    return; // no cierres el modal: el usuario puede reintentar sin perder lo escrito
-  }
+  await saveState();
   closeActivityModal();
   render();
   toast(d.id ? "Actividad actualizada" : "Actividad registrada");
+}
+
+/* ---------- Modo "Evento" (varias actividades-hijas) ---------- */
+function renderEventoModoHTML(d, memberOpts){
+  return `
+      <div class="form-grid" style="grid-template-columns:1fr;">
+        <div class="field"><label>Nombre del evento</label><input id="ev-titulo" value="${d.eventoTitulo||""}" placeholder="Ej: Semana de la Geología 2026"></div>
+      </div>
+
+      <div class="section-label"><span>Actividades del evento</span><button type="button" class="btn ghost tiny" data-action="ev-add-act">+ Añadir actividad</button></div>
+      <div id="ev-act-rows">
+        ${d.eventoActs.map((a,i)=>`
+          <div class="card" style="padding:14px 16px;margin-bottom:12px;border-left:4px solid ${EVENTO_COLORS[i%EVENTO_COLORS.length]};">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <b style="font-size:12.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;">Actividad ${i+1}</b>
+              ${d.eventoActs.length>1?`<button type="button" class="btn danger tiny" data-action="ev-remove-act" data-idx="${i}">✕ Quitar</button>`:""}
+            </div>
+            <div class="form-grid">
+              <div class="field span2"><label>Nombre de la actividad</label><input class="ev-a-titulo" data-idx="${i}" value="${a.titulo}" placeholder="Ej: Ponencia inaugural"></div>
+              <div class="field"><label>Fecha</label><input type="date" class="ev-a-fecha" data-idx="${i}" value="${a.fecha}"></div>
+              <div class="field"><label>Hora</label><input class="ev-a-hora" data-idx="${i}" value="${a.hora||""}" placeholder="Ej: 09:00–11:00"></div>
+              <div class="field"><label>Moderador 1</label><select class="ev-a-mod1" data-idx="${i}"><option value="">— elegir —</option>${memberOpts(a.moderadorId)}</select></div>
+              <div class="field"><label>Moderador 2 (opcional)</label><select class="ev-a-mod2" data-idx="${i}"><option value="">— sin asignar —</option>${memberOpts(a.moderador2Id)}</select></div>
+            </div>
+          </div>`).join("")}
+      </div>
+      <div class="muted" style="font-size:12px;padding:2px 0 6px;">Cada actividad de este evento aparecerá con su propio color en el Gantt y el Calendario. Ninguna requiere tareas por unidad ni afecta la asistencia (esa se registra por separado, de forma manual).</div>
+  `;
+}
+
+function wireEventoModoListeners(){
+  $("#ev-titulo").oninput = (e)=> activityDraft.eventoTitulo = e.target.value;
+
+  $$(".ev-a-titulo").forEach(el=> el.oninput = e=> activityDraft.eventoActs[+el.dataset.idx].titulo = e.target.value);
+  $$(".ev-a-fecha").forEach(el=> el.oninput = e=> activityDraft.eventoActs[+el.dataset.idx].fecha = e.target.value);
+  $$(".ev-a-hora").forEach(el=> el.oninput = e=> activityDraft.eventoActs[+el.dataset.idx].hora = e.target.value);
+  $$(".ev-a-mod1").forEach(el=> el.onchange = e=> activityDraft.eventoActs[+el.dataset.idx].moderadorId = e.target.value);
+  $$(".ev-a-mod2").forEach(el=> el.onchange = e=> activityDraft.eventoActs[+el.dataset.idx].moderador2Id = e.target.value);
+
+  $('[data-action="ev-add-act"]').onclick = ()=>{ activityDraft.eventoActs.push(blankEventoAct()); renderModalRoot(); };
+  $$('[data-action="ev-remove-act"]').forEach(b=> b.onclick = ()=>{ activityDraft.eventoActs.splice(+b.dataset.idx,1); renderModalRoot(); });
+
+  if(!activityDraft.eventoActs.length) activityDraft.eventoActs.push(blankEventoAct());
+}
+
+async function saveEvento(){
+  const d = activityDraft;
+  if(!d.eventoTitulo.trim()){ toast("Ponle un nombre al evento"); return; }
+  if(!d.eventoActs.length){ toast("Añade al menos una actividad al evento"); return; }
+  for(const a of d.eventoActs){
+    if(!a.titulo.trim()){ toast("Cada actividad del evento necesita un nombre"); return; }
+    if(!a.fecha){ toast("Cada actividad del evento necesita una fecha"); return; }
+    if(!a.moderadorId){ toast("Cada actividad del evento necesita un Moderador 1"); return; }
+  }
+  const eventId = d.id || uid("evt");
+  const eventoTitulo = d.eventoTitulo.trim();
+
+  // Reemplaza por completo las actividades-hijas previas de este evento (si edición)
+  state.activities = state.activities.filter(a=>a.eventId!==eventId);
+  d.eventoActs.forEach(a=>{
+    state.activities.push({
+      id: a.id || uid("act"),
+      eventId, eventTitle: eventoTitulo,
+      fecha: a.fecha, fechaFin: a.fecha,
+      tipo: "Evento", tipoOtro: "",
+      titulo: a.titulo.trim(),
+      hora: (a.hora||"").trim(),
+      moderadorId: a.moderadorId, moderador2Id: a.moderador2Id||"",
+      redactorId: "",
+      tasks: []
+    });
+  });
+
+  await saveState();
+  closeActivityModal();
+  render();
+  toast(d.id ? "Evento actualizado" : "Evento registrado");
 }
 
 /* ============================================================
@@ -1075,7 +1237,8 @@ function viewGantt(){
       cells += `<div class="gantt-cell ${wk?'weekend':''}"></div>`;
     }
     if(r.kind==="header"){
-      rowsHtml += `<div class="gantt-label gl-hdr"><b>◆ ${r.actividad}</b><span>${TIPO_ICON[r.tipo]||"✦"} Actividad completa · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}</span></div>${cells}`;
+      const evColor = r.eventId ? eventoActColor(state.activities.find(a=>a.id===r.activityId)) : null;
+      rowsHtml += `<div class="gantt-label gl-hdr" ${evColor?`style="border-left:4px solid ${evColor};"`:""}><b>${evColor?"● ":"◆ "}${r.actividad}</b><span>${TIPO_ICON[r.tipo]||"✦"} ${r.eventId?"Actividad de evento":"Actividad completa"} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}</span></div>${cells}`;
     }else{
       rowsHtml += `<div class="gantt-label gl-task"><b>${r.tarea||"—"}</b><span>${r.unidad||"—"}</span></div>${cells}`;
     }
@@ -1135,9 +1298,10 @@ function paintGanttBars(){
     bar.style.width = (span*dayWidth - 4) + "px";
     bar.style.top = (labelEl.offsetTop + 8) + "px";
     bar.style.height = (labelEl.getBoundingClientRect().height - 16) + "px";
-    bar.style.background = r.kind==="header" ? "var(--teal)" : (r.estado==="Completada" ? STATUS_HEX["Completada"] : r.estado==="Retrasada" ? STATUS_HEX["Retrasada"] : r.estado==="En Proceso" ? STATUS_HEX["En Proceso"] : (UNIT_HEX[r.unidad]||STATUS_HEX["Pendiente"]));
-    bar.textContent = r.kind==="header" ? ("◆ "+r.actividad) : (r.tarea || "");
-    bar.title = r.kind==="header" ? `${r.actividad} · actividad completa · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}` : `${r.actividad} · ${r.unidad} · ${r.estado} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}`;
+    const evColorBar = (r.kind==="header" && r.eventId) ? eventoActColor(state.activities.find(a=>a.id===r.activityId)) : null;
+    bar.style.background = r.kind==="header" ? (evColorBar || "var(--teal)") : (r.estado==="Completada" ? STATUS_HEX["Completada"] : r.estado==="Retrasada" ? STATUS_HEX["Retrasada"] : r.estado==="En Proceso" ? STATUS_HEX["En Proceso"] : (UNIT_HEX[r.unidad]||STATUS_HEX["Pendiente"]));
+    bar.textContent = r.kind==="header" ? ((evColorBar?"● ":"◆ ")+r.actividad) : (r.tarea || "");
+    bar.title = r.kind==="header" ? `${r.actividad} · ${r.eventId?"actividad de evento":"actividad completa"} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}` : `${r.actividad} · ${r.unidad} · ${r.estado} · ${fmtShort(r.fechaInicio)} → ${fmtShort(r.fechaFin)}`;
     grid.appendChild(bar);
   });
 }
@@ -1181,7 +1345,7 @@ function calWeek(){
       const act = activityOnDay(d);
       return `<div class="week-day ${act?'meetingday':''}">
         <h4>${DOW[(d.getDay()+6)%7]}${isSameDay(d,today)?' · hoy':''}<b>${d.getDate()}</b></h4>
-        ${act?`<div class="week-task" style="background:var(--teal);">${TIPO_ICON[act.tipo]} ${act.titulo}</div>`:""}
+        ${act?`<div class="week-task" style="background:${act.eventId?eventoActColor(act):"var(--teal)"};">${TIPO_ICON[act.tipo]} ${act.titulo}</div>`:""}
         ${tasks.map(t=>`<div class="week-task" style="background:${UNIT_HEX[t.unidad]}">${t.tarea||t.actividad}<small>${t.unidad} · ${t.estado}</small></div>`).join("") || (act?"":`<div class="muted" style="font-size:11px;">Sin actividades</div>`)}
       </div>`;
     }).join("")}
@@ -1245,10 +1409,15 @@ function calYear(){
 /* ============================================================
    ASISTENCIA — P / F / J por actividad
 ============================================================ */
+/* La asistencia es 100% manual e independiente: las columnas SOLO nacen de
+   state.attendanceDays (creadas a mano con "+ Registrar asistencia" o con el
+   botón de acceso directo de la reunión general). Nunca se generan solas a
+   partir de state.activities/eventos — aunque se registre una actividad o un
+   evento en el sistema, eso no debe crear ni sugerir ninguna columna aquí. */
 function attendanceColumns(){
-  const fromActs = state.activities.map(a=>({ id:a.id, fecha:a.fecha, fechaFin:a.fechaFin||a.fecha, tipo:a.tipo, tipoOtro:a.tipoOtro }));
-  const fromDays = state.attendanceDays.map(d=>({ id:d.id, fecha:d.fecha, fechaFin:d.fecha, tipo:d.tipo, tipoOtro:d.tipoOtro }));
-  return [...fromActs, ...fromDays].sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
+  return [...state.attendanceDays]
+    .map(d=>({ id:d.id, fecha:d.fecha, fechaFin:d.fecha, tipo:d.tipo, tipoOtro:d.tipoOtro }))
+    .sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
 }
 function viewAsistencia(){
   const acts = attendanceColumns();
@@ -1406,7 +1575,7 @@ function openMeetingModal(){
 function attachHandlers(){
   $$(".navbtn").forEach(b=> b.onclick = ()=>{ setView(b.dataset.view); closeMobileMenu(); });
 
-  $$("[data-action]", $("#app-content")).forEach(el=>{
+  $$("[data-action]").forEach(el=>{
     const action = el.dataset.action;
     if(action==="quick-task-status" && el.tagName==="SELECT"){
       el.onchange = async ()=>{
@@ -1480,13 +1649,8 @@ function attachHandlers(){
         if(clave===null) return;
         if(clave!==MASTER_KEY){ toast("⚠ Clave maestra incorrecta"); return; }
         const actId = el.dataset.activity;
-        const esDiaSuelto = state.attendanceDays.some(d=>d.id===actId);
-        const esActividad = state.activities.some(a=>a.id===actId);
-        const msg = esActividad
-          ? "¿Eliminar esta columna de asistencia? La actividad seguirá existiendo en \"Actividades\"; solo se borrará su columna en Asistencia y los registros de P/F/J de todos los miembros. Esta acción no se puede deshacer."
-          : "¿Eliminar esta columna de asistencia? Se borrarán los registros de P/F/J de todos los miembros para este día. Esta acción no se puede deshacer.";
-        if(!confirm(msg)) return;
-        if(esDiaSuelto) state.attendanceDays = state.attendanceDays.filter(d=>d.id!==actId);
+        if(!confirm("¿Eliminar esta columna de asistencia? Se borrarán los registros de P/F/J de todos los miembros para este día. Esta acción no se puede deshacer.")) return;
+        state.attendanceDays = state.attendanceDays.filter(d=>d.id!==actId);
         delete state.attendance[actId];
         delete state.attendanceState[actId];
         await saveState();
@@ -1501,6 +1665,35 @@ function attachHandlers(){
       if(action==="open-activity-modal"){ openActivityModal(null); }
       else if(action==="open-attendance-day-modal"){ openAttendanceDayModal(); }
       else if(action==="edit-activity"){ const a = state.activities.find(x=>x.id===el.dataset.id); if(a) openActivityModal(a); }
+      else if(action==="edit-event"){ openEventModal(el.dataset.event); }
+      else if(action==="del-activity"){
+        const clave = prompt("Ingresa la clave maestra para eliminar esta actividad:");
+        if(clave===null) return;
+        if(clave!==MASTER_KEY){ toast("⚠ Clave maestra incorrecta"); return; }
+        const a = state.activities.find(x=>x.id===el.dataset.id);
+        if(!a) return;
+        if(!confirm(`¿Eliminar la actividad "${a.titulo}"? También se eliminará su columna de asistencia si existe. Esta acción no se puede deshacer.`)) return;
+        state.activities = state.activities.filter(x=>x.id!==a.id);
+        delete state.attendance[a.id];
+        delete state.attendanceState[a.id];
+        await saveState();
+        render();
+        toast("Actividad eliminada");
+      }
+      else if(action==="del-event"){
+        const clave = prompt("Ingresa la clave maestra para eliminar este evento:");
+        if(clave===null) return;
+        if(clave!==MASTER_KEY){ toast("⚠ Clave maestra incorrecta"); return; }
+        const eventId = el.dataset.event;
+        const hijas = state.activities.filter(x=>x.eventId===eventId);
+        if(!hijas.length) return;
+        if(!confirm(`¿Eliminar el evento "${hijas[0].eventTitle||"Evento"}" y sus ${hijas.length} actividad${hijas.length===1?"":"es"}? También se eliminarán sus columnas de asistencia si existen. Esta acción no se puede deshacer.`)) return;
+        hijas.forEach(h=>{ delete state.attendance[h.id]; delete state.attendanceState[h.id]; });
+        state.activities = state.activities.filter(x=>x.eventId!==eventId);
+        await saveState();
+        render();
+        toast("Evento eliminado");
+      }
       else if(action==="del-member"){
         const clave = prompt("Ingresa la clave maestra para eliminar a este miembro:");
         if(clave===null) return;
@@ -1623,7 +1816,6 @@ async function init(){
   $("#app-content").innerHTML = `<div class="empty" style="padding:120px 0;"><div class="ic">◆</div><b>Cargando GEOUNSAAC…</b></div>`;
   await loadState();
   render();
-  subscribeState();
 }
 init();
 </script>
